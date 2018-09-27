@@ -8,7 +8,6 @@
 #include <IRsend.h>
 #include "ArduinoJson.h"        // JSON parser
 #include <FS.h>                 // File system management
-#include "ircustcode.h"
 #define REV "REV0001"
 
 
@@ -35,8 +34,13 @@ WiFiClient ESPclient;
 #define BUTTON_PIN D3
 #define LEDPIN D4
 IRsend irsend(IR_LED);  // Set the GPIO to be used to sending the message.
+File fsUploadFile;
 char meta[] = "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">";
-
+StaticJsonBuffer<20480> jsonBuffer;
+String jsonFileName="/IRRemote.json";
+String cssFileName="/IRRemote.css";
+String css ="";
+JsonObject* root;
 // for the captive network
 const byte DNS_PORT = 53;
 IPAddress apIP(192, 168, 1, 1);
@@ -47,6 +51,9 @@ int captiveNetwork = 0;
 int networkConnected = 0;
 PubSubClient client(ESPclient);
 
+String getContentType(String filename); // convert the file extension to the MIME type
+bool handleFileRead(String path);       // send the right file to the client (if it exists)
+void handleFileUpload();                // upload a new file to the SPIFFS
 
 ////////////////////////////////////////////////////////////////////////////////////////////////
 // Timer management
@@ -57,8 +64,8 @@ void setTimer(int minutes){
     timerMillisEnd = 0;
   }
   traceCh("Set timer for (min)");
-  traceChln(minutes);
-  }
+  traceChln(String(minutes));
+  
 
   timerMillisEnd = millis() + minutes*60000;
 }
@@ -85,103 +92,6 @@ int checkTimer(){
 void processIRCode(int code){
   switch ( code )  
   {  
-     case 0:
-        Serial.println("0"); 
-        irsend.sendRaw(LED_ON, 71, 38); 
-        break;  
-     case 1:  
-        Serial.println("1"); 
-        irsend.sendRaw(LED_OFF, 71, 38); 
-        break;  
-     case 2:  
-        Serial.println("2"); 
-        irsend.sendRaw(LED_Increase, 71, 38); 
-        break;  
-     case 3:  
-        Serial.println("3"); 
-        irsend.sendRaw(LED_Decrease, 71, 38); 
-        break;  
-     case 4:  
-        irsend.sendRaw(LED_1, 71, 38); 
-        break;  
-     case 5:  
-        irsend.sendRaw(LED_2, 71, 38); 
-        break;  
-     case 6:  
-        irsend.sendRaw(LED_3, 71, 38); 
-        break;  
-     case 7:  
-        irsend.sendRaw(LED_4, 71, 38); 
-        break;  
-     case 8:  
-        irsend.sendRaw(LED_5, 71, 38); 
-        break;  
-     case 9:  
-        irsend.sendRaw(LED_6, 71, 38); 
-        break;  
-     case 10:  
-        irsend.sendRaw(LED_7, 71, 38); 
-        break;  
-     case 11:  
-        irsend.sendRaw(LED_8, 71, 38); 
-        break;  
-     case 12:  
-        irsend.sendRaw(LED_9, 71, 38); 
-        break;  
-     case 13:  
-        irsend.sendRaw(LED_10, 71, 38); 
-        break;  
-     case 14:  
-        irsend.sendRaw(LED_11, 71, 38); 
-        break;  
-     case 15:  
-        irsend.sendRaw(LED_12, 71, 38); 
-        break;  
-     case 16:  
-        irsend.sendRaw(TV_POWER, 71, 38); 
-        break;  
-     case 17:  
-        irsend.sendRaw(TV_VOLUP, 71, 38); 
-        break;  
-     case 18:  
-        irsend.sendRaw(TV_VOLDOWN, 71, 38); 
-        break;  
-     case 19:  
-        irsend.sendRaw(TV_CHANUP, 71, 38); 
-        break;  
-     case 20:  
-        irsend.sendRaw(TV_CHANDOWN, 71, 38); 
-        break;  
-     case 21:  
-        irsend.sendRaw(TV_1, 71, 38); 
-        break;  
-     case 22:  
-        irsend.sendRaw(TV_2, 71, 38); 
-        break;  
-     case 23:  
-        irsend.sendRaw(TV_3, 71, 38); 
-        break;  
-     case 24:  
-        irsend.sendRaw(TV_4, 71, 38); 
-        break;  
-     case 25:  
-        irsend.sendRaw(TV_5, 71, 38); 
-        break;  
-     case 26:  
-        irsend.sendRaw(TV_6, 71, 38); 
-        break;  
-     case 27:  
-        irsend.sendRaw(TV_7, 71, 38); 
-        break;  
-     case 28:  
-        irsend.sendRaw(TV_8, 71, 38); 
-        break;  
-     case 29:  
-        irsend.sendRaw(TV_9, 71, 38); 
-        break;  
-     case 30:  
-        irsend.sendRaw(TV_0, 71, 38); 
-        break;  
      case 101:  
         // Tempo 1 min
         setTimer(1);
@@ -266,7 +176,7 @@ int readRevison(char* value,int* index){
   value[i]='\0';
   traceCh("Revision read : ");
   traceChln(value);
-  }
+
   // Compare the revision
   if (strcmp(value,REV) != 0){
     return -2;
@@ -280,7 +190,7 @@ int getParams(char* revision,char* ssid,char* pass,char* mqtt,char* mqttPort,cha
   wnReturn = readRevison (revision,&i);
   traceCh("getParams wnReturn = ");
   traceChln(String(wnReturn));
-  }
+  
   if (wnReturn <0){
     return -1;
   }
@@ -298,7 +208,7 @@ void writeParam(char* value,int* index){
   traceCh("writeParam ");
   traceCh(value);
   traceCh(" Index = ");
-  traceChlnn(*index);
+  traceChln(String(*index));
   for (int i = 0; i < strlen(value); ++i)
   {
     EEPROM.write(*index, value[i]);
@@ -404,40 +314,37 @@ void callback(char* topic, byte* payload, unsigned int length) {
 
 void reconnect() {
   // Loop until we're reconnected
-      if (WiFi.status() != WL_CONNECTED) {
-        char chTimer[30];
-        int remainingTimer;
-        remainingTimer = timerMillisEnd - millis();
-        chTimer[0]='\0';
-        sprintf(chTimer,"%d",remainingTimer);
-        traceChln("Save timer");
-        setParams(ssid,pass,mqtt,mqttport,idx,chTimer);
-        traceChln("Rebooting ESP");
-        ESP.restart();
-      }
+  if (WiFi.status() != WL_CONNECTED) {
+    char chTimer[30];
+    int remainingTimer;
+    remainingTimer = timerMillisEnd - millis();
+    chTimer[0]='\0';
+    sprintf(chTimer,"%d",remainingTimer);
+    traceChln("Save timer");
+    setParams(ssid,pass,mqtt,mqttport,idx,chTimer);
+    traceChln("Rebooting ESP");
+    ESP.restart();
+  }
   while (!client.connected()) {
-
     Serial.print("Attempting MQTT connection...");
     manageButton();
     if(checkTimer() == 1){
       // send the IR_OFF
-      irsend.sendRaw(LED_OFF, 71, 38);
+      // $*$*$ irsend.sendRaw(LED_OFF, 71, 38);
     }
- 
     String clientId = idx;
    
     // Attempt to connect
     if (client.connect(clientId.c_str(),"uxewingr","up2OdBVGET64")) {
-      if (debug == 1){
-        Serial.println("connected");
-      }
+      traceChln("connected");
       // Once connected, publish an announcement...
       client.publish("led/out", "IR connected");
       // ... and resubscribe
       client.subscribe("led/in");
+      return;
     } else {
       traceChln("failed, rc=");
-      traceCh(client.state());
+      traceCh(String(client.state()));
       traceChln(" try again in 5 seconds");
       // hangle web server requests 
       server.handleClient();
@@ -452,7 +359,7 @@ void reconnect() {
 ////////////////////////////////////////////////////////////////////////////////////////////////
 
 // Generate the server page
-void D_AP_SER_Page() {
+void network_Page() {
   int Tnetwork=0,i=0,len=0;
   String st="",s="";
   Tnetwork = WiFi.scanNetworks(); // Scan for total networks available
@@ -511,7 +418,7 @@ void root_Page() {
   String s="";
   // Generate the html root page
   header(&s);
-  s +="<h1>EzBus</h1> ";
+  s +="<h1>IR Remote</h1> ";
   s +="<a href=\"/settings\">Settings</a><br>";
   s +="<a href=\"/code\">Code</a><br>";
   s += "</body>";
@@ -525,6 +432,7 @@ void settings_Page() {
   header(&s);
   s +="<h1>IR Remote Settings</h1> ";
   s +="<a href=\"/up\">Upload file</a><br>";
+  s +="<a href=\"/network\">Network</a><br>";
   footer(&s);
   server.send( 200 , "text/html", s);
 }
@@ -587,6 +495,81 @@ void manageButton(void){
   }
 }
 
+String getContentType(String filename) { // convert the file extension to the MIME type
+  if (filename.endsWith(".html")) return "text/html";
+  else if (filename.endsWith(".css")) return "text/css";
+  else if (filename.endsWith(".js")) return "application/javascript";
+  else if (filename.endsWith(".ico")) return "image/x-icon";
+  else if (filename.endsWith(".gz")) return "application/x-gzip";
+  return "text/plain";
+}
+
+bool handleFileRead(String path) { // send the right file to the client (if it exists)
+  traceChln("handleFileRead: " + path);
+  if (path.endsWith("/")) path += "index.html";          // If a folder is requested, send the index file
+  String contentType = getContentType(path);             // Get the MIME type
+  String pathWithGz = path + ".gz";
+  if (SPIFFS.exists(pathWithGz) || SPIFFS.exists(path)) { // If the file exists, either as a compressed archive, or normal
+    if (SPIFFS.exists(pathWithGz))                         // If there's a compressed version available
+      path += ".gz";                                         // Use the compressed verion
+    File file = SPIFFS.open(path, "r");                    // Open the file
+    size_t sent = server.streamFile(file, contentType);    // Send it to the client
+    file.close();                                          // Close the file again
+    traceChln(String("\tSent file: ") + path);
+    return true;
+  }
+  traceChln(String("\tFile Not Found: ") + path);   // If the file doesn't exist, return false
+  return false;
+}
+
+void handleFileUpload(){ // upload a new file to the SPIFFS
+  traceChln("uploading a file !");
+  HTTPUpload& upload = server.upload();
+  if(upload.status == UPLOAD_FILE_START){
+    String filename = upload.filename;
+    if(!filename.startsWith("/")) filename = "/"+filename;
+    jsonFileName = filename;
+    traceCh("handleFileUpload Name: "); traceChln(filename);
+    fsUploadFile = SPIFFS.open(filename, "w");            // Open the file for writing in SPIFFS (create if it doesn't exist)
+    filename = String();
+  } else if(upload.status == UPLOAD_FILE_WRITE){
+    if(fsUploadFile)
+      fsUploadFile.write(upload.buf, upload.currentSize); // Write the received bytes to the file
+  } else if(upload.status == UPLOAD_FILE_END){
+    if(fsUploadFile) {                                    // If the file was successfully created
+      fsUploadFile.close();                               // Close the file again
+      traceCh("handleFileUpload Size: "); traceChln(String(upload.totalSize));
+      traceChln("file name : "+upload.filename);
+      server.sendHeader("Location","/success.html");      // Redirect the client to the success page
+      server.send(303);
+      //updateJson(jsonFileName,&root);
+    } else {
+      server.send(500, "text/plain", "500: couldn't create file");
+    }
+  }
+}
+
+void updateJson(String fileName,JsonObject** Proot){
+  traceChln("updateJson load file");
+  traceChln(fileName);
+  if(fileName == ""){
+    return;
+  }
+  File dataFile = SPIFFS.open(fileName, "r");   //open file (path has been set elsewhere and works)
+  String json = dataFile.readString();                    // read data to 'json' variable
+  dataFile.close();                                       // close file
+  traceChln(json);
+  jsonBuffer.clear();
+  *Proot =  &jsonBuffer.parseObject(json);
+  if((**Proot).invalid()==JsonObject::invalid()){
+    traceChln("Failed to parse Json");
+  }
+  int arraySize =  (**Proot)["Passengers"].size();
+  String s=String(arraySize);
+  traceChln("Nb liste : "+s);
+}
+
+
 void loadCss(String fileName){
     traceChln("loadCss load file");
     traceChln(fileName);
@@ -639,7 +622,17 @@ void setup() {
   idx[0] = '\0';
   timer[0] = '\0';
   delayMessage[0] = '\0';
-  
+
+  // initilize file system
+  SPIFFS.begin();
+  // Load json file
+  if (isFileExists(jsonFileName)){
+    updateJson(jsonFileName,&root);
+  }
+  if (isFileExists(cssFileName)){
+    loadCss(cssFileName);
+  }
+
   delay(200); //Stable Wifi
   Serial.begin(115200); //Set Baud Rate 
   EEPROM.begin(512);
@@ -671,14 +664,14 @@ void setup() {
         manageButton();
         if(checkTimer() == 1){
           // send the IR_OFF
-          irsend.sendRaw(LED_OFF, 71, 38);
+        //$*$*$  irsend.sendRaw(LED_OFF, 71, 38);
         }
       }
       traceCh(".");
       traceChln("");
       traceChln("WiFi connected");
       traceChln("IP address: ");
-      traceChln(WiFi.localIP());
+      traceChln(String(WiFi.localIP()));
       blinkLed();
       // Connect mqtt server
       client.setServer(mqtt, atoi(mqttport));
@@ -687,8 +680,13 @@ void setup() {
   
       WiFi.hostname("SwitchWIFI");
       // Start the web server
-      server.begin();
+      server.on("/",root_Page);
+      server.on("/up",upload_Page);
+      server.on("/settings",settings_Page);
       server.on("/reset",resetSettings);
+      server.on("/network",network_Page); 
+      server.on("/a",Get_Req); // If submit button is pressed get the new SSID and Password and store it in EEPROM 
+      server.begin();
     }
     else{
       startServer = 0;
@@ -706,8 +704,10 @@ void loop() {
     delay(100); //Stable AP
  
     dnsServer.start(DNS_PORT, "*", apIP);
-    server.onNotFound(D_AP_SER_Page);
-    server.on("/",D_AP_SER_Page); 
+    server.on("/",root_Page);
+    server.on("/up",upload_Page);
+    server.on("/settings",settings_Page);
+    server.on("/network",network_Page); 
     server.on("/a",Get_Req); // If submit button is pressed get the new SSID and Password and store it in EEPROM 
     server.begin();
     startServer = 1;
@@ -748,6 +748,6 @@ void loop() {
   }
   if(checkTimer() == 1){
     // send the IR_OFF
-    irsend.sendRaw(LED_OFF, 71, 38);
+    //irsend.sendRaw(LED_OFF, 71, 38);
   }
 }

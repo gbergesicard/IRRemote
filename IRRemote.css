@@ -1,0 +1,69 @@
+@media (max-width: 640px) {
+	* {
+		box-sizing: border-box;
+	}
+
+	body {
+		width: auto;
+		margin: 0;
+		padding: 0;
+		background-color:LightBlue;
+	}
+	img,
+	table,
+	td,
+	blockquote,
+	code,
+	pre,
+	textarea,
+	input,
+	iframe,
+	object,
+	embed,
+	video {
+		max-width: 100%;
+	}
+	img {
+		height: auto;
+	}
+	textarea,
+	table,
+	td,
+	th,
+	code,
+	pre,
+	samp {
+		-webkit-hyphens: auto;
+		-moz-hyphens: auto;
+		hyphens: auto;
+		word-wrap: break-word;
+	}
+	code,
+	pre,
+	samp {
+		white-space: pre-wrap;
+	}
+	.element1,
+	.element2 {
+		float: none;
+		width: auto;
+	}
+	.hide_mobile {
+		display: none !important;
+	}
+	td, th {
+		border: 1px solid #dddddd;
+		text-align: left;
+		padding: 8px;
+	}
+		tr:nth-child(even) {
+		background-color: #dddddd;
+	}
+	body:before {
+		content: "Version mobile du site";
+		display: block;
+		text-align: center;
+		font-style: italic;
+		color: #777;
+	}
+}

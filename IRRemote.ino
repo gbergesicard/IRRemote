@@ -37,8 +37,8 @@ IRsend irsend(IR_LED);  // Set the GPIO to be used to sending the message.
 File fsUploadFile;
 char meta[] = "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">";
 StaticJsonBuffer<20480> jsonBuffer;
-String jsonFileName="/IRRemote.json";
-String cssFileName="/IRRemote.css";
+const String jsonFileName="/IRRemote.json";
+const String cssFileName="/IRRemote.css";
 String css ="";
 JsonObject* root;
 // for the captive network
@@ -325,6 +325,7 @@ void reconnect() {
     traceChln("Rebooting ESP");
     ESP.restart();
   }
+  traceChln("reconnect before while mqtt client status : "+String(client.connected()));
   while (!client.connected()) {
     Serial.print("Attempting MQTT connection...");
     manageButton();
@@ -341,14 +342,13 @@ void reconnect() {
       client.publish("led/out", "IR connected");
       // ... and resubscribe
       client.subscribe("led/in");
-      return;
     } else {
       traceChln("failed, rc=");
       traceCh(String(client.state()));
-      traceChln(" try again in 5 seconds");
+      traceChln(" try again in 1 seconds");
       // hangle web server requests 
       server.handleClient();
-      // Wait 15 seconds before retrying
+      // Wait 1 second before retrying
       delay(1000);
     }
   }
@@ -433,6 +433,45 @@ void settings_Page() {
   s +="<h1>IR Remote Settings</h1> ";
   s +="<a href=\"/up\">Upload file</a><br>";
   s +="<a href=\"/network\">Network</a><br>";
+  s +="<a href=\"/ircodelist\">Network</a><br>";
+  footer(&s);
+  server.send( 200 , "text/html", s);
+}
+
+void ircode_Page() {
+  traceChln("Serving travel Page");
+  int arraySize =  (*root)["IRCode"].size();
+  traceCh("Nb IR Codes :");
+  traceChln(String(arraySize));
+  String s = "";
+  // Generate the html root page
+  header(&s);
+  s += "<h1>IR Code List</h1> ";
+  s += "<table>";
+  s += "<h2>Total nimber of IR Codes : " + String(arraySize) + "</h2>";
+  s += "<tr>";
+  s += "  <th>Description</th>";
+  s += "  <th>Type</th>";
+  s += "  <th>Length</th>";
+  s += "</tr>";
+  // loop on the liste elements
+  for (short wni = 0; wni < arraySize; wni++) {
+    s += "<tr>";
+    const char* Desc = (*root)["IRCode"][wni]["Desc"];
+    const char* Type = (*root)["IRCode"][wni]["Type"];
+    const char* Len = (*root)["IRCode"][wni]["Len"];
+    s += "<td>";
+    s += Desc;
+    s += "</td>";
+    s += "<td>";
+    s += Type;
+    s += "</td>";
+    s += "<td>";
+    s += Len;
+    s += "</td>";
+    s += "</tr>";
+  }
+  s += "</table>";
   footer(&s);
   server.send( 200 , "text/html", s);
 }
@@ -522,30 +561,34 @@ bool handleFileRead(String path) { // send the right file to the client (if it e
   return false;
 }
 
-void handleFileUpload(){ // upload a new file to the SPIFFS
+void handleFileUpload() { // upload a new file to the SPIFFS
   traceChln("uploading a file !");
   HTTPUpload& upload = server.upload();
-  if(upload.status == UPLOAD_FILE_START){
+  if (upload.status == UPLOAD_FILE_START) {
     String filename = upload.filename;
-    if(!filename.startsWith("/")) filename = "/"+filename;
-    jsonFileName = filename;
+    if (!filename.startsWith("/")) filename = "/" + filename;
     traceCh("handleFileUpload Name: "); traceChln(filename);
     fsUploadFile = SPIFFS.open(filename, "w");            // Open the file for writing in SPIFFS (create if it doesn't exist)
     filename = String();
-  } else if(upload.status == UPLOAD_FILE_WRITE){
-    if(fsUploadFile)
+  } else if (upload.status == UPLOAD_FILE_WRITE) {
+    if (fsUploadFile)
       fsUploadFile.write(upload.buf, upload.currentSize); // Write the received bytes to the file
-  } else if(upload.status == UPLOAD_FILE_END){
-    if(fsUploadFile) {                                    // If the file was successfully created
+  } else if (upload.status == UPLOAD_FILE_END) {
+    if (fsUploadFile) {                                   // If the file was successfully created
       fsUploadFile.close();                               // Close the file again
       traceCh("handleFileUpload Size: "); traceChln(String(upload.totalSize));
-      traceChln("file name : "+upload.filename);
-      server.sendHeader("Location","/success.html");      // Redirect the client to the success page
+      traceChln("file name : " + upload.filename);
+      lcdPrint(1, "Get "+upload.filename+" -> OK");
+      if (("/"+upload.filename)==jsonFileName) {
+        updateJson(jsonFileName, &root);        
+      } 
+      if (("/"+upload.filename)==cssFileName) {
+        updateCss(cssFileName);        
+      }
+      server.sendHeader("Location", "/success.html");     // Redirect the client to the success page
       server.send(303);
-      //updateJson(jsonFileName,&root);
     } else {
       server.send(500, "text/plain", "500: couldn't create file");
-    }
   }
 }
 
@@ -570,8 +613,8 @@ void updateJson(String fileName,JsonObject** Proot){
 }
 
 
-void loadCss(String fileName){
-    traceChln("loadCss load file");
+void updateCss(String fileName){
+    traceChln("updateCss load file");
     traceChln(fileName);
   if(fileName == ""){
     return;
@@ -630,7 +673,7 @@ void setup() {
     updateJson(jsonFileName,&root);
   }
   if (isFileExists(cssFileName)){
-    loadCss(cssFileName);
+    updateCss(cssFileName);
   }
 
   delay(200); //Stable Wifi
@@ -638,6 +681,16 @@ void setup() {
   EEPROM.begin(512);
   traceChln("Configuring access point...");
   dumpEEPROM();
+  // Start the web server
+  server.on("/",root_Page);
+  server.on("/up",upload_Page);
+  server.on("/settings",settings_Page);
+  server.on("/reset",resetSettings);
+  server.on("/network",network_Page); 
+  server.on("/ircodelist",ircode_Page); 
+  server.on("/a",Get_Req); // If submit button is pressed get the new SSID and Password and store it in EEPROM 
+  server.begin();
+
   // Reading EEProm SSID-Password
   if(getParams(revision,ssid,pass,mqtt,mqttport,idx,timer) !=0 ){
     // Config mode
@@ -671,7 +724,9 @@ void setup() {
       traceChln("");
       traceChln("WiFi connected");
       traceChln("IP address: ");
-      traceChln(String(WiFi.localIP()));
+      if (debug == 1){
+        Serial.println(WiFi.localIP());
+      }
       blinkLed();
       // Connect mqtt server
       client.setServer(mqtt, atoi(mqttport));
@@ -679,14 +734,6 @@ void setup() {
       networkConnected = 1;
   
       WiFi.hostname("SwitchWIFI");
-      // Start the web server
-      server.on("/",root_Page);
-      server.on("/up",upload_Page);
-      server.on("/settings",settings_Page);
-      server.on("/reset",resetSettings);
-      server.on("/network",network_Page); 
-      server.on("/a",Get_Req); // If submit button is pressed get the new SSID and Password and store it in EEPROM 
-      server.begin();
     }
     else{
       startServer = 0;
@@ -704,12 +751,6 @@ void loop() {
     delay(100); //Stable AP
  
     dnsServer.start(DNS_PORT, "*", apIP);
-    server.on("/",root_Page);
-    server.on("/up",upload_Page);
-    server.on("/settings",settings_Page);
-    server.on("/network",network_Page); 
-    server.on("/a",Get_Req); // If submit button is pressed get the new SSID and Password and store it in EEPROM 
-    server.begin();
     startServer = 1;
     // captive network is active 
     captiveNetwork = 1;
@@ -721,6 +762,7 @@ void loop() {
   }
   server.handleClient();     
   if(networkConnected == 1){
+    traceChln("loop Mqtt client status :"+String(client.connected()));
     if (!client.connected()) {
       reconnect();
     }

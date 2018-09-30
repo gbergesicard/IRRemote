@@ -56,6 +56,30 @@ bool handleFileRead(String path);       // send the right file to the client (if
 void handleFileUpload();                // upload a new file to the SPIFFS
 
 ////////////////////////////////////////////////////////////////////////////////////////////////
+// Trace management
+////////////////////////////////////////////////////////////////////////////////////////////////
+void traceChln(char* chTrace){
+  if (debug == 1){
+    Serial.println(chTrace);
+  }
+}
+void traceChln(String chTrace){
+  if (debug == 1){
+    Serial.println(chTrace);
+  }
+}
+void traceCh(char* chTrace){
+  if (debug == 1){
+    Serial.print(chTrace);
+  }
+}
+void traceCh(String chTrace){
+  if (debug == 1){
+    Serial.print(chTrace);
+  }
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////
 // Timer management
 ////////////////////////////////////////////////////////////////////////////////////////////////
 // Set the timer for a given number of minutes
@@ -313,6 +337,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
 }
 
 void reconnect() {
+  traceChln("reconnect Enter");
   // Loop until we're reconnected
   if (WiFi.status() != WL_CONNECTED) {
     char chTimer[30];
@@ -327,7 +352,7 @@ void reconnect() {
   }
   traceChln("reconnect before while mqtt client status : "+String(client.connected()));
   while (!client.connected()) {
-    Serial.print("Attempting MQTT connection...");
+    traceCh("Attempting MQTT connection...");
     manageButton();
     if(checkTimer() == 1){
       // send the IR_OFF
@@ -567,7 +592,7 @@ void handleFileUpload() { // upload a new file to the SPIFFS
   if (upload.status == UPLOAD_FILE_START) {
     String filename = upload.filename;
     if (!filename.startsWith("/")) filename = "/" + filename;
-    traceCh("handleFileUpload Name: "); traceChln(filename);
+    traceChln("handleFileUpload Name: "); traceChln(filename);
     fsUploadFile = SPIFFS.open(filename, "w");            // Open the file for writing in SPIFFS (create if it doesn't exist)
     filename = String();
   } else if (upload.status == UPLOAD_FILE_WRITE) {
@@ -576,9 +601,8 @@ void handleFileUpload() { // upload a new file to the SPIFFS
   } else if (upload.status == UPLOAD_FILE_END) {
     if (fsUploadFile) {                                   // If the file was successfully created
       fsUploadFile.close();                               // Close the file again
-      traceCh("handleFileUpload Size: "); traceChln(String(upload.totalSize));
+      traceChln("handleFileUpload Size: "); traceChln(String(upload.totalSize));
       traceChln("file name : " + upload.filename);
-      lcdPrint(1, "Get "+upload.filename+" -> OK");
       if (("/"+upload.filename)==jsonFileName) {
         updateJson(jsonFileName, &root);        
       } 
@@ -589,6 +613,7 @@ void handleFileUpload() { // upload a new file to the SPIFFS
       server.send(303);
     } else {
       server.send(500, "text/plain", "500: couldn't create file");
+    }
   }
 }
 
@@ -628,28 +653,6 @@ void updateCss(String fileName){
 bool isFileExists(String filename){
   return(SPIFFS.exists(filename));
 }
-
-void traceChln(char* chTrace){
-  if (debug == 1){
-    Serial.println(chTrace);
-  }
-}
-void traceChln(String chTrace){
-  if (debug == 1){
-    Serial.println(chTrace);
-  }
-}
-void traceCh(char* chTrace){
-  if (debug == 1){
-    Serial.print(chTrace);
-  }
-}
-void traceCh(String chTrace){
-  if (debug == 1){
-    Serial.print(chTrace);
-  }
-}
-
 
 void setup() {
   //pinMode(0, OUTPUT);
@@ -760,17 +763,12 @@ void loop() {
   if (captiveNetwork == 1){
     dnsServer.processNextRequest();
   }
-  server.handleClient();     
   if(networkConnected == 1){
     traceChln("loop Mqtt client status :"+String(client.connected()));
     if (!client.connected()) {
       reconnect();
     }
     else{
-      // send keep alive every 60 sec
-//        if (debug == 1){
-//          Serial.println(timerKeepAliveMqtt);
-//        }
       if (timerKeepAliveMqtt >= delayKeepAlive){
         // send the keepAlive
         traceChln("Keep alive message");
@@ -785,11 +783,12 @@ void loop() {
       else{
         timerKeepAliveMqtt++;
       }
+      client.loop();
     }
-    client.loop();
   }
   if(checkTimer() == 1){
     // send the IR_OFF
     //irsend.sendRaw(LED_OFF, 71, 38);
   }
+  server.handleClient(); 
 }

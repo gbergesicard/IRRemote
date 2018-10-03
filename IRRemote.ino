@@ -6,7 +6,6 @@
 #include <string>
 #include <DNSServer.h>
 #include <IRsend.h>
-#include "ArduinoJson.h"        // JSON parser
 #include <FS.h>                 // File system management
 #define REV "REV0001"
 
@@ -27,6 +26,7 @@ int timerMillisEnd = 0;
 int timerKeepAliveMqtt = 0; //60 sec
 int delayKeepAlive = 160;
 char delayMessage[20];
+int codeList[200]
 
 ESP8266WebServer server(80);//Specify port 
 WiFiClient ESPclient;
@@ -36,16 +36,16 @@ WiFiClient ESPclient;
 IRsend irsend(IR_LED);  // Set the GPIO to be used to sending the message.
 File fsUploadFile;
 char meta[] = "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">";
-StaticJsonBuffer<20480> jsonBuffer;
-const String jsonFileName="/IRRemote.json";
+StaticJsonBuffer<40960> jsonBuffer;
+const String csvFileName="/IRRemote.csv";
 const String cssFileName="/IRRemote.css";
 String css ="";
-JsonObject* root;
 // for the captive network
 const byte DNS_PORT = 53;
 IPAddress apIP(192, 168, 1, 1);
 DNSServer dnsServer;
 int captiveNetwork = 0;
+bool mqttKO = false;
 
 // for mqtt
 int networkConnected = 0;
@@ -337,6 +337,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
 }
 
 void reconnect() {
+  int wni =0;
   traceChln("reconnect Enter");
   // Loop until we're reconnected
   if (WiFi.status() != WL_CONNECTED) {
@@ -352,7 +353,11 @@ void reconnect() {
   }
   traceChln("reconnect before while mqtt client status : "+String(client.connected()));
   while (!client.connected()) {
-    traceCh("Attempting MQTT connection...");
+    // hangle web server requests 
+    server.handleClient();
+    traceCh("Attempting MQTT connection to server ");
+    traceCh(mqtt);
+    traceCh("...");
     manageButton();
     if(checkTimer() == 1){
       // send the IR_OFF
@@ -368,13 +373,20 @@ void reconnect() {
       // ... and resubscribe
       client.subscribe("led/in");
     } else {
-      traceChln("failed, rc=");
-      traceCh(String(client.state()));
-      traceChln(" try again in 1 seconds");
-      // hangle web server requests 
-      server.handleClient();
-      // Wait 1 second before retrying
+      if(wni<5)
+      {
+        wni++;
+        traceCh("failed, rc=");
+        traceChln(String(client.state()));
+        traceChln(" try again in 1 seconds");
+        // Wait 1 second before retrying
       delay(1000);
+      }
+      else{
+        mqttKO = true;
+        traceChln("Mqtt connection not possible, abort");
+        return;
+      }
     }
   }
 }
@@ -603,9 +615,6 @@ void handleFileUpload() { // upload a new file to the SPIFFS
       fsUploadFile.close();                               // Close the file again
       traceChln("handleFileUpload Size: "); traceChln(String(upload.totalSize));
       traceChln("file name : " + upload.filename);
-      if (("/"+upload.filename)==jsonFileName) {
-        updateJson(jsonFileName, &root);        
-      } 
       if (("/"+upload.filename)==cssFileName) {
         updateCss(cssFileName);        
       }
@@ -615,26 +624,6 @@ void handleFileUpload() { // upload a new file to the SPIFFS
       server.send(500, "text/plain", "500: couldn't create file");
     }
   }
-}
-
-void updateJson(String fileName,JsonObject** Proot){
-  traceChln("updateJson load file");
-  traceChln(fileName);
-  if(fileName == ""){
-    return;
-  }
-  File dataFile = SPIFFS.open(fileName, "r");   //open file (path has been set elsewhere and works)
-  String json = dataFile.readString();                    // read data to 'json' variable
-  dataFile.close();                                       // close file
-  traceChln(json);
-  jsonBuffer.clear();
-  *Proot =  &jsonBuffer.parseObject(json);
-  if((**Proot).invalid()==JsonObject::invalid()){
-    traceChln("Failed to parse Json");
-  }
-  int arraySize =  (**Proot)["Passengers"].size();
-  String s=String(arraySize);
-  traceChln("Nb liste : "+s);
 }
 
 
@@ -671,28 +660,27 @@ void setup() {
 
   // initilize file system
   SPIFFS.begin();
-  // Load json file
-  if (isFileExists(jsonFileName)){
-    updateJson(jsonFileName,&root);
-  }
-  if (isFileExists(cssFileName)){
-    updateCss(cssFileName);
-  }
-
-  delay(200); //Stable Wifi
   Serial.begin(115200); //Set Baud Rate 
   EEPROM.begin(512);
   traceChln("Configuring access point...");
   dumpEEPROM();
-  // Start the web server
-  server.on("/",root_Page);
-  server.on("/up",upload_Page);
-  server.on("/settings",settings_Page);
-  server.on("/reset",resetSettings);
-  server.on("/network",network_Page); 
-  server.on("/ircodelist",ircode_Page); 
-  server.on("/a",Get_Req); // If submit button is pressed get the new SSID and Password and store it in EEPROM 
-  server.begin();
+  // when needed 
+  //resetSettings();
+  // Load json file
+  if (isFileExists(csvFileName)){
+    traceChln("Csv file missing");
+  }
+  else{
+    traceCh("File doesn't exist : ");
+    traceChln(csvFileName);
+  }
+  if (isFileExists(cssFileName)){
+    updateCss(cssFileName);
+  }
+  else{
+    traceCh("File doesn't exist : ");
+    traceChln(cssFileName);
+  }
 
   // Reading EEProm SSID-Password
   if(getParams(revision,ssid,pass,mqtt,mqttport,idx,timer) !=0 ){
@@ -706,6 +694,7 @@ void setup() {
     }
     if(ssid[0] != '\0'){
       WiFi.mode(WIFI_STA);
+      delay(200); //Stable Wifi
       traceChln(ssid);
       traceChln(pass);
       traceChln(mqtt);
@@ -713,9 +702,9 @@ void setup() {
       traceChln(idx);
       traceChln(timer);
       WiFi.begin(ssid,pass);
+      delay(200); //Stable Wifi
       while (WiFi.status() != WL_CONNECTED) {
         delay(500);
-        
         traceChln(".");
         manageButton();
         if(checkTimer() == 1){
@@ -735,13 +724,29 @@ void setup() {
       client.setServer(mqtt, atoi(mqttport));
       client.setCallback(callback);
       networkConnected = 1;
-  
       WiFi.hostname("SwitchWIFI");
     }
     else{
       startServer = 0;
     }
   }
+  // Start the web server
+  server.on("/",root_Page);
+  server.on("/up",upload_Page);
+  server.on("/settings",settings_Page);
+  server.on("/reset",resetSettings);
+  server.on("/network",network_Page); 
+  server.on("/ircodelist",ircode_Page); 
+  server.on("/a",Get_Req); // If submit button is pressed get the new SSID and Password and store it in EEPROM 
+  server.on("/upload", HTTP_POST,                       // if the client posts to the upload page
+    [](){ server.send(200); },                          // Send status 200 (OK) to tell the client we are ready to receive
+    handleFileUpload                                    // Receive and save the file
+  );
+  server.on("/upload", HTTP_GET, []() {                 // if the client requests the upload page
+  if (!handleFileRead(csvFileName))                // send it if it exists
+    server.send(404, "text/plain", "404: Not Found"); // otherwise, respond with a 404 (Not Found) error
+  });
+  server.begin();
 }
 
 void loop() {
@@ -764,9 +769,11 @@ void loop() {
     dnsServer.processNextRequest();
   }
   if(networkConnected == 1){
-    traceChln("loop Mqtt client status :"+String(client.connected()));
+    //traceChln("loop Mqtt client status :"+String(client.connected()));
     if (!client.connected()) {
-      reconnect();
+      if(mqttKO == false){
+         reconnect();
+      }
     }
     else{
       if (timerKeepAliveMqtt >= delayKeepAlive){

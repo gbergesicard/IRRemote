@@ -26,7 +26,7 @@ int timerMillisEnd = 0;
 int timerKeepAliveMqtt = 0; //60 sec
 int delayKeepAlive = 160;
 char delayMessage[20];
-int codeList[200]
+uint16_t codeList[200];
 
 ESP8266WebServer server(80);//Specify port 
 WiFiClient ESPclient;
@@ -36,8 +36,8 @@ WiFiClient ESPclient;
 IRsend irsend(IR_LED);  // Set the GPIO to be used to sending the message.
 File fsUploadFile;
 char meta[] = "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">";
-StaticJsonBuffer<40960> jsonBuffer;
 const String csvFileName="/IRRemote.csv";
+bool csvFileExists = false;
 const String cssFileName="/IRRemote.css";
 String css ="";
 // for the captive network
@@ -136,7 +136,16 @@ void processIRCode(int code){
         // Tempo 180 min
         setTimer(180);
         break;  
-     default:  
+     default:
+        String desc ="";
+        int type = 0;
+        int len = 0;
+        if (getIRCodeInCSV(csvFileName, code, &desc, &type, &len, codeList) == -1){
+          return;
+        }
+        else{
+          irsend.sendRaw(codeList, len, 38);
+        }
         return;  
   }
   onOffLed();
@@ -392,7 +401,7 @@ void reconnect() {
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////
-// Wifi Setting management
+// Web pages
 ////////////////////////////////////////////////////////////////////////////////////////////////
 
 // Generate the server page
@@ -477,37 +486,36 @@ void settings_Page() {
 
 void ircode_Page() {
   traceChln("Serving travel Page");
-  int arraySize =  (*root)["IRCode"].size();
-  traceCh("Nb IR Codes :");
-  traceChln(String(arraySize));
+//  traceCh("Nb IR Codes :");
+//  traceChln(String(arraySize));
   String s = "";
   // Generate the html root page
   header(&s);
   s += "<h1>IR Code List</h1> ";
   s += "<table>";
-  s += "<h2>Total nimber of IR Codes : " + String(arraySize) + "</h2>";
+//  s += "<h2>Total nimber of IR Codes : " + String(arraySize) + "</h2>";
   s += "<tr>";
   s += "  <th>Description</th>";
   s += "  <th>Type</th>";
   s += "  <th>Length</th>";
   s += "</tr>";
   // loop on the liste elements
-  for (short wni = 0; wni < arraySize; wni++) {
-    s += "<tr>";
-    const char* Desc = (*root)["IRCode"][wni]["Desc"];
-    const char* Type = (*root)["IRCode"][wni]["Type"];
-    const char* Len = (*root)["IRCode"][wni]["Len"];
-    s += "<td>";
-    s += Desc;
-    s += "</td>";
-    s += "<td>";
-    s += Type;
-    s += "</td>";
-    s += "<td>";
-    s += Len;
-    s += "</td>";
-    s += "</tr>";
-  }
+//  for (short wni = 0; wni < arraySize; wni++) {
+//    s += "<tr>";
+//    const char* Desc = (*root)["IRCode"][wni]["Desc"];
+//    const char* Type = (*root)["IRCode"][wni]["Type"];
+//    const char* Len = (*root)["IRCode"][wni]["Len"];
+//    s += "<td>";
+//    s += Desc;
+//    s += "</td>";
+//    s += "<td>";
+//    s += Type;
+//    s += "</td>";
+//    s += "<td>";
+//    s += Len;
+//    s += "</td>";
+//    s += "</tr>";
+//  }
   s += "</table>";
   footer(&s);
   server.send( 200 , "text/html", s);
@@ -528,6 +536,9 @@ void upload_Page(){
   server.send( 200 , "text/html", s);
 }
 
+////////////////////////////////////////////////////////////////////////////////////////////////
+// Utilities
+/////////////////////////////////////////////////////////////////
 void blinkLed(void){
   digitalWrite(LEDPIN, LOW);
   delay(200);
@@ -615,6 +626,9 @@ void handleFileUpload() { // upload a new file to the SPIFFS
       fsUploadFile.close();                               // Close the file again
       traceChln("handleFileUpload Size: "); traceChln(String(upload.totalSize));
       traceChln("file name : " + upload.filename);
+      if (("/"+upload.filename)==csvFileName) {
+        csvFileExists = true;        
+      }
       if (("/"+upload.filename)==cssFileName) {
         updateCss(cssFileName);        
       }
@@ -643,6 +657,79 @@ bool isFileExists(String filename){
   return(SPIFFS.exists(filename));
 }
 
+////////////////////////////////////////////////////////////////////////////////////////////////
+// Csv File management
+// Thgis function will be able to extract a ligne depending on the mqtt code and it will extract
+// the different values.
+////////////////////////////////////////////////////////////////////////////////////////////////
+int getIRCodeInCSV(String fileName,int mqttCode,String* desc,int* type, int* len,uint16_t* codeArray){
+  traceCh("getIRCodeInCSV mqttCode = ");
+  traceChln(String(mqttCode));
+  if (csvFileExists == true){
+    File dataFile = SPIFFS.open(fileName, "r");
+    int wni;
+    String curLine = "";
+    String codes = "";
+    for(wni=0;wni==mqttCode;wni++){
+      curLine == dataFile.readStringUntil('\r');
+    }
+    traceCh("getIRCodeInCSV wni = ");
+    traceChln(String(wni));
+    if(wni == mqttCode){
+      traceCh("getIRCodeInCSV line to process : ");
+      traceChln(curLine);
+      if (curLine == ""){
+        traceChln("getIRCodeInCSV line is empty");
+        return -1;
+      }
+      // extract the data from the curLine
+      int from = -1;
+      int to = -1;
+      to = curLine.indexOf(';');
+      if (to < 0){
+        traceChln("getIRCodeInCSV line not properly formated");
+        return -1;
+      }
+      *desc = curLine.substring(0,to-1);
+      from = to;
+      to = curLine.indexOf(';',to+1);
+      *type = atoi(curLine.substring(from+1,to-1).c_str());
+      from = to;
+      to = curLine.indexOf(';',to+1);
+      *len = atoi(curLine.substring(from+1,to-1).c_str());
+      from = to;
+      codes = curLine.substring(from+1,curLine.length()-1);
+      // convert string codes in int array
+      if(convertStringToArray(codes,codeArray) == *len){
+        return 1; // OK !
+      }
+    }
+    else{
+      return -1;
+    }
+  }
+  return -1;
+}
+// Will return the number of converted items otherwise -1
+int convertStringToArray(String codes, uint16_t* codeArray){
+  int from = 0;
+  int to = -1;
+  int wni = 0;
+  to = codes.indexOf(',');
+  if (to < 0){
+    traceChln("convertStringToArray code not properly formated");
+    return -1;
+  }
+  while(to > 0 && to < codes.length()){
+    codeArray[wni] = atoi(codes.substring(from,to-1).c_str());
+    from = to;
+    to = codes.indexOf(',',to+1);
+  }
+  traceCh("convertStringToArray wni = ");
+  traceChln(String(wni));
+  return wni;
+}
+
 void setup() {
   //pinMode(0, OUTPUT);
   pinMode(BUTTON_PIN, INPUT);
@@ -666,9 +753,10 @@ void setup() {
   dumpEEPROM();
   // when needed 
   //resetSettings();
-  // Load json file
+  // Load csv file
   if (isFileExists(csvFileName)){
-    traceChln("Csv file missing");
+    traceChln("Csv file OK");
+    csvFileExists = true;
   }
   else{
     traceCh("File doesn't exist : ");

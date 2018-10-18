@@ -140,10 +140,12 @@ void processIRCode(int code){
         String desc ="";
         int type = 0;
         int len = 0;
+        traceChln("Code from MQTT : "+String(code));
         if (getIRCodeInCSV(csvFileName, code, &desc, &type, &len, codeList) == -1){
           return;
         }
         else{
+          traceChln("Code from MQTT : "+String(code)+" desc "+ desc+" "+" len "+ len+" "+String(codeList[0])+" "+String(codeList[1])+" "+String(codeList[2])+" "+String(codeList[3])+" "+String(codeList[4]));
           irsend.sendRaw(codeList, len, 38);
         }
         return;  
@@ -466,7 +468,7 @@ void root_Page() {
   header(&s);
   s +="<h1>IR Remote</h1> ";
   s +="<a href=\"/settings\">Settings</a><br>";
-  s +="<a href=\"/code\">Code</a><br>";
+  s +="<a href=\"/ircodelist\">Code</a><br>";
   s += "</body>";
   s += "</html>";
   server.send( 200 , "text/html", s);
@@ -496,26 +498,32 @@ void ircode_Page() {
 //  s += "<h2>Total nimber of IR Codes : " + String(arraySize) + "</h2>";
   s += "<tr>";
   s += "  <th>Description</th>";
+  s += "  <th>Mqtt code</th>";
   s += "  <th>Type</th>";
   s += "  <th>Length</th>";
   s += "</tr>";
   // loop on the liste elements
-//  for (short wni = 0; wni < arraySize; wni++) {
-//    s += "<tr>";
-//    const char* Desc = (*root)["IRCode"][wni]["Desc"];
-//    const char* Type = (*root)["IRCode"][wni]["Type"];
-//    const char* Len = (*root)["IRCode"][wni]["Len"];
-//    s += "<td>";
-//    s += Desc;
-//    s += "</td>";
-//    s += "<td>";
-//    s += Type;
-//    s += "</td>";
-//    s += "<td>";
-//    s += Len;
-//    s += "</td>";
-//    s += "</tr>";
-//  }
+  String desc ="";
+  int type = 0;
+  int len = 0;
+  short wni = 0;
+  while(getIRCodeInCSV(csvFileName, wni, &desc, &type, &len, codeList) >0){
+    s += "<tr>";
+    s += "<td>";
+    s += String(desc);
+    s += "</td>";
+    s += "<td>";
+    s += String(wni);
+    s += "</td>";
+    s += "<td>";
+    s += String(type);
+    s += "</td>";
+    s += "<td>";
+    s += String(len);
+    s += "</td>";
+    s += "</tr>";
+    wni++;
+  }
   s += "</table>";
   footer(&s);
   server.send( 200 , "text/html", s);
@@ -667,17 +675,19 @@ int getIRCodeInCSV(String fileName,int mqttCode,String* desc,int* type, int* len
   traceChln(String(mqttCode));
   if (csvFileExists == true){
     File dataFile = SPIFFS.open(fileName, "r");
-    int wni;
+    int wni = 0;
     String curLine = "";
     String codes = "";
-    for(wni=0;wni==mqttCode;wni++){
-      curLine == dataFile.readStringUntil('\r');
+    while(wni<=mqttCode){
+      curLine = dataFile.readStringUntil('\r');
+      //traceChln("getIRCodeInCSV line read = " + curLine);
+      wni++;
     }
     traceCh("getIRCodeInCSV wni = ");
     traceChln(String(wni));
-    if(wni == mqttCode){
-      traceCh("getIRCodeInCSV line to process : ");
-      traceChln(curLine);
+    if(wni == mqttCode+1){
+      //traceCh("getIRCodeInCSV line to process : ");
+      //traceChln(curLine);
       if (curLine == ""){
         traceChln("getIRCodeInCSV line is empty");
         return -1;
@@ -690,24 +700,31 @@ int getIRCodeInCSV(String fileName,int mqttCode,String* desc,int* type, int* len
         traceChln("getIRCodeInCSV line not properly formated");
         return -1;
       }
-      *desc = curLine.substring(0,to-1);
+      *desc = curLine.substring(0,to);
       from = to;
       to = curLine.indexOf(';',to+1);
-      *type = atoi(curLine.substring(from+1,to-1).c_str());
+      *type = atoi(curLine.substring(from+1,to).c_str());
       from = to;
       to = curLine.indexOf(';',to+1);
-      *len = atoi(curLine.substring(from+1,to-1).c_str());
+      *len = atoi(curLine.substring(from+1,to).c_str());
+      traceChln("getIRCodeInCSV len = "+String(*len));
       from = to;
-      codes = curLine.substring(from+1,curLine.length()-1);
+      codes = curLine.substring(from+1,curLine.length());
       // convert string codes in int array
       if(convertStringToArray(codes,codeArray) == *len){
+        traceChln("getIRCodeInCSV OK");
         return 1; // OK !
       }
     }
     else{
+      traceChln("getIRCodeInCSV KO1");
       return -1;
     }
   }
+  else{
+    traceChln("getIRCodeInCSV No CSV file");
+  }
+  traceChln("getIRCodeInCSV KO2");
   return -1;
 }
 // Will return the number of converted items otherwise -1
@@ -720,11 +737,19 @@ int convertStringToArray(String codes, uint16_t* codeArray){
     traceChln("convertStringToArray code not properly formated");
     return -1;
   }
-  while(to > 0 && to < codes.length()){
-    codeArray[wni] = atoi(codes.substring(from,to-1).c_str());
+  while(to > 0){
+    codeArray[wni] = atoi(codes.substring(from+1,to).c_str());
+    //traceChln(String(atoi(codes.substring(from+1,to).c_str())));
+    //traceChln("from "+String(from+1)+" to "+to);
     from = to;
     to = codes.indexOf(',',to+1);
+    wni++;
   }
+  //extract the last item
+  traceChln(codes.substring(from+1).c_str());
+  traceCh("convertStringToArray last item : ");
+  traceChln(codes.substring(from+1, codes.length()).c_str());
+  wni++;
   traceCh("convertStringToArray wni = ");
   traceChln(String(wni));
   return wni;

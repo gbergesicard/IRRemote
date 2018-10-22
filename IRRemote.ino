@@ -31,8 +31,8 @@ uint16_t codeList[200];
 ESP8266WebServer server(80);//Specify port 
 WiFiClient ESPclient;
 #define IR_LED D2  // ESP8266 GPIO pin to use. Recommended: 4 (D2).
-#define BUTTON_PIN D3
-#define LEDPIN D4
+#define BUTTON_PIN D6
+#define LEDPIN D5
 IRsend irsend(IR_LED);  // Set the GPIO to be used to sending the message.
 File fsUploadFile;
 char meta[] = "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">";
@@ -46,6 +46,7 @@ IPAddress apIP(192, 168, 1, 1);
 DNSServer dnsServer;
 int captiveNetwork = 0;
 bool mqttKO = false;
+uint16_t LED_ON[71] = {9084, 4486,  598, 536,  596, 534,  598, 536,  596, 536,  596, 538,  596, 536,  598, 536,  596, 536,  598, 1628,  610, 1642,  598, 1642,  596, 1642,  598, 538,  596, 1628,  610, 1642,  598, 1640,  600, 1640,  600, 1640,  600, 536,  596, 534,  598, 536,  598, 536,  598, 536,  596, 540,  596, 534,  600, 538,  594, 1642,  598, 1644,  596, 1640,  598, 1642,  598, 1640,  598, 1642,  598, 41030,  9074, 2218,  600};  // NEC F7C03F
 
 // for mqtt
 int networkConnected = 0;
@@ -112,7 +113,16 @@ int checkTimer(){
 ////////////////////////////////////////////////////////////////////////////////////////////////
 // Mqtt code management
 ////////////////////////////////////////////////////////////////////////////////////////////////
-
+void dumpCodeList(uint16_t* codeArray,int len){
+  if( debug == 0){
+    return;
+  }
+  traceCh("dumpCodeList len = "+String(len)+" code = (");
+  for(int wni=0;wni<len;wni++){
+    traceCh(String(codeArray[wni])+",");
+  }
+  traceChln(")");
+}
 void processIRCode(int code){
   switch ( code )  
   {  
@@ -145,10 +155,12 @@ void processIRCode(int code){
           return;
         }
         else{
-          traceChln("Code from MQTT : "+String(code)+" desc "+ desc+" "+" len "+ len+" "+String(codeList[0])+" "+String(codeList[1])+" "+String(codeList[2])+" "+String(codeList[3])+" "+String(codeList[4]));
+          traceChln("Code from MQTT : "+String(code)+" desc "+ desc);
+          
+          dumpCodeList(codeList,len);
           irsend.sendRaw(codeList, len, 38);
+          //irsend.sendRaw(LED_ON, len, 38);
         }
-        return;  
   }
   onOffLed();
   return;  
@@ -729,9 +741,10 @@ int getIRCodeInCSV(String fileName,int mqttCode,String* desc,int* type, int* len
 }
 // Will return the number of converted items otherwise -1
 int convertStringToArray(String codes, uint16_t* codeArray){
-  int from = 0;
+  int from = -1;
   int to = -1;
   int wni = 0;
+  traceChln(codes);
   to = codes.indexOf(',');
   if (to < 0){
     traceChln("convertStringToArray code not properly formated");
@@ -739,16 +752,17 @@ int convertStringToArray(String codes, uint16_t* codeArray){
   }
   while(to > 0){
     codeArray[wni] = atoi(codes.substring(from+1,to).c_str());
-    //traceChln(String(atoi(codes.substring(from+1,to).c_str())));
     //traceChln("from "+String(from+1)+" to "+to);
+    //traceChln(String(atoi(codes.substring(from+1,to).c_str())));
     from = to;
     to = codes.indexOf(',',to+1);
     wni++;
   }
   //extract the last item
-  traceChln(codes.substring(from+1).c_str());
-  traceCh("convertStringToArray last item : ");
-  traceChln(codes.substring(from+1, codes.length()).c_str());
+  //traceChln(codes.substring(from+1).c_str());
+  //traceCh("convertStringToArray last item : ");
+  //traceChln(codes.substring(from+1, codes.length()).c_str());
+  codeArray[wni] = atoi(codes.substring(from+1, codes.length()).c_str());
   wni++;
   traceCh("convertStringToArray wni = ");
   traceChln(String(wni));

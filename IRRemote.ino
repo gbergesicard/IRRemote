@@ -20,7 +20,7 @@ char mqttport[6];  //Read mqtt port From Web Page
 char idx[10];      //Read idx From Web Page
 char timer[10];    //Read timer value From Web Page
 int startServer = 0;
-int debug = 1;
+int debug = 0;
 int button = 0;
 int timerMillisEnd = 0;
 int timerKeepAliveMqtt = 0; //60 sec
@@ -30,7 +30,7 @@ uint16_t codeList[200];
 
 ESP8266WebServer server(80);//Specify port 
 WiFiClient ESPclient;
-#define IR_LED D2  // ESP8266 GPIO pin to use. Recommended: 4 (D2).
+#define IR_LED D7  // ESP8266 GPIO pin to use. Recommended: 4 (D2).
 #define BUTTON_PIN D6
 #define LEDPIN D5
 IRsend irsend(IR_LED);  // Set the GPIO to be used to sending the message.

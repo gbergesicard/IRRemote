@@ -392,7 +392,10 @@ void reconnect() {
     if (client.connect(clientId.c_str(),"uxewingr","up2OdBVGET64")) {
       traceChln("connected");
       // Once connected, publish an announcement...
-      client.publish("led/out", "IR connected");
+      String deviceIP ="";
+      deviceIP = WiFi.localIP().toString();
+      client.publish("led/out", "IR connected IP = ");
+      client.publish("led/out", deviceIP.c_str());
       // ... and resubscribe
       client.subscribe("led/in");
     } else {
@@ -905,8 +908,11 @@ void loop() {
     else{
       if (timerKeepAliveMqtt >= delayKeepAlive){
         // send the keepAlive
-        traceChln("Keep alive message");
-        client.publish("led/out", "Keep alive message");
+        String deviceIP ="";
+        deviceIP = WiFi.localIP().toString();
+        traceChln("Keep alive message for "+deviceIP);
+        client.publish("led/out", "Keep alive message for IP ");
+        client.publish("led/out", deviceIP.c_str());
         if(timerMillisEnd > 0){
           int remainingTime = timerMillisEnd - millis();
           sprintf(delayMessage,"Temps Restant %d sec", (int)(remainingTime/1000));

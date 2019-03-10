@@ -20,11 +20,11 @@ char mqttport[6];  //Read mqtt port From Web Page
 char idx[10];      //Read idx From Web Page
 char timer[10];    //Read timer value From Web Page
 int startServer = 0;
-int debug = 0;
+int debug = 1;
 int button = 0;
 int timerMillisEnd = 0;
 int timerKeepAliveMqtt = 0; //60 sec
-int delayKeepAlive = 160;
+int delayKeepAlive = 200;
 char delayMessage[20];
 uint16_t codeList[200];
 
@@ -151,7 +151,7 @@ void processIRCode(int code){
         int type = 0;
         int len = 0;
         traceChln("Code from MQTT : "+String(code));
-        if (getIRCodeInCSV(csvFileName, code, &desc, &type, &len, codeList) == -1){
+        if (getIRCodeInCSV(csvFileName,false, code, &desc, &type, &len, codeList) == -1){
           return;
         }
         else{
@@ -522,7 +522,7 @@ void ircode_Page() {
   int type = 0;
   int len = 0;
   short wni = 0;
-  while(getIRCodeInCSV(csvFileName, wni, &desc, &type, &len, codeList) >0){
+  while(getIRCodeInCSV(csvFileName, true, wni, &desc, &type, &len, codeList) >0){
     s += "<tr>";
     s += "<td>";
     s += String(desc);
@@ -587,12 +587,12 @@ void onOffLed(void){
 
 void manageButton(void){
   button = digitalRead(BUTTON_PIN);
-  if (button == LOW){
+  if (button == HIGH){
     traceChln(" Button pressed");
     digitalWrite(LEDPIN, HIGH);
     delay(1000);
     button = digitalRead(BUTTON_PIN);
-    if (button == LOW){
+    if (button == HIGH){
       blinkLed();
       ssid[0]='\0';
       setParams(ssid,pass,mqtt,mqttport,idx,"0");
@@ -685,7 +685,7 @@ bool isFileExists(String filename){
 // Thgis function will be able to extract a ligne depending on the mqtt code and it will extract
 // the different values.
 ////////////////////////////////////////////////////////////////////////////////////////////////
-int getIRCodeInCSV(String fileName,int mqttCode,String* desc,int* type, int* len,uint16_t* codeArray){
+int getIRCodeInCSV(String fileName, bool opti,int mqttCode,String* desc,int* type, int* len,uint16_t* codeArray){
   traceCh("getIRCodeInCSV mqttCode = ");
   traceChln(String(mqttCode));
   if (csvFileExists == true){
@@ -723,6 +723,9 @@ int getIRCodeInCSV(String fileName,int mqttCode,String* desc,int* type, int* len
       to = curLine.indexOf(';',to+1);
       *len = atoi(curLine.substring(from+1,to).c_str());
       traceChln("getIRCodeInCSV len = "+String(*len));
+      if( opti == true){
+        return 1;
+      }
       from = to;
       codes = curLine.substring(from+1,curLine.length());
       // convert string codes in int array

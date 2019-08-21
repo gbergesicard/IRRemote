@@ -20,13 +20,15 @@ char mqttport[6];  //Read mqtt port From Web Page
 char idx[10];      //Read idx From Web Page
 char timer[10];    //Read timer value From Web Page
 int startServer = 0;
-int debug = 1;
+int debug = 0;
 int button = 0;
 int timerMillisEnd = 0;
 int timerKeepAliveMqtt = 0; //60 sec
 int delayKeepAlive = 200;
 char delayMessage[20];
 uint16_t codeList[200];
+int wniReboot = 0;
+int nbLoop = 59;
 
 ESP8266WebServer server(80);//Specify port 
 WiFiClient ESPclient;
@@ -922,6 +924,14 @@ void loop() {
           client.publish("led/out", delayMessage);
         }
         timerKeepAliveMqtt = 0;
+        if (wniReboot>= nbLoop){
+          //reboot
+          traceChln("Rebooting ESP");
+          ESP.restart();
+        }
+        else{
+          wniReboot ++;
+        }
       }
       else{
         timerKeepAliveMqtt++;

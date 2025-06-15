@@ -7,7 +7,21 @@
 #include <DNSServer.h>
 #include <IRsend.h>
 #include <FS.h>                 // File system management
-#define REV "REV0001"
+#define REV "REV0002"
+#include <SPI.h>
+#include <Wire.h>
+#include "Adafruit_SSD1306.h"
+
+//for OLED display
+#define OLED_RESET 0  // GPIO0
+Adafruit_SSD1306 display(OLED_RESET);
+#define NUMFLAKES 10
+#define XPOS 0
+#define YPOS 1
+#define DELTAY 2
+#define LOGO16_GLCD_HEIGHT 16
+#define LOGO16_GLCD_WIDTH  16
+// End OLED display
 
 
 const char *ssidAP = "ConfigureDevice"; //Ap SSID
@@ -16,25 +30,33 @@ char revision[10]; //Read revision
 char ssid[33];     //Read SSID From Web Page
 char pass[64];     //Read Password From Web Page
 char mqtt[100];    //Read mqtt server From Web Page
+char mqttUser[30]; //Read mqtt server User From Web Page
+char mqttPass[30]; //Read mqtt server Password From Web Page
 char mqttport[6];  //Read mqtt port From Web Page
 char idx[10];      //Read idx From Web Page
 char timer[10];    //Read timer value From Web Page
 int startServer = 0;
-int debug = 0;
+int debug = 1;
 int button = 0;
 int timerMillisEnd = 0;
+int timerOLEDMillisEnd = 0;
 int timerKeepAliveMqtt = 0; //60 sec
 int delayKeepAlive = 200;
 char delayMessage[20];
 uint16_t codeList[200];
 int wniReboot = 0;
 int nbLoop = 59;
+int LEDHIGH = LOW;
+int LEDLOW = HIGH;
+int BUTTONHIGH = LOW;
+int BUTTONLOW = HIGH;
+int dysplayOFFminute = 2;
 
 ESP8266WebServer server(80);//Specify port 
 WiFiClient ESPclient;
 #define IR_LED D7  // ESP8266 GPIO pin to use. Recommended: 4 (D2).
 #define BUTTON_PIN D6
-#define LEDPIN D5
+#define LEDPIN LED_BUILTIN
 IRsend irsend(IR_LED);  // Set the GPIO to be used to sending the message.
 File fsUploadFile;
 char meta[] = "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">";
@@ -61,7 +83,7 @@ void handleFileUpload();                // upload a new file to the SPIFFS
 ////////////////////////////////////////////////////////////////////////////////////////////////
 // Trace management
 ////////////////////////////////////////////////////////////////////////////////////////////////
-void traceChln(char* chTrace){
+void traceChln(const char* chTrace){
   if (debug == 1){
     Serial.println(chTrace);
   }
@@ -71,7 +93,7 @@ void traceChln(String chTrace){
     Serial.println(chTrace);
   }
 }
-void traceCh(char* chTrace){
+void traceCh(const char* chTrace){
   if (debug == 1){
     Serial.print(chTrace);
   }
@@ -85,6 +107,43 @@ void traceCh(String chTrace){
 ////////////////////////////////////////////////////////////////////////////////////////////////
 // Timer management
 ////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////
+// OLED management
+////////////////////////////////////////////////////////////////////////////////////////////////
+void OLEDClear(){
+  display.setCursor(0,0);
+  display.clearDisplay();
+  display.display();
+}
+void OLEDChln(const char* chTexte){
+  display.println(chTexte);
+  display.display();
+  timerOLEDMillisEnd = millis() + dysplayOFFminute*60000;
+}
+void OLEDChln(String chTexte){
+  display.println(chTexte);
+  display.display();
+  timerOLEDMillisEnd = millis() + dysplayOFFminute*60000;
+}
+void OLEDCh(const char* chTexte){
+  display.print(chTexte);
+  display.display();
+  timerOLEDMillisEnd = millis() + dysplayOFFminute*60000;
+}
+void OLEDCh(String chTexte){
+  display.print(chTexte);
+  display.display();
+  timerOLEDMillisEnd = millis() + dysplayOFFminute*60000;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////
+// OLED management
+////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+
+
+
 // Set the timer for a given number of minutes
 void setTimer(int minutes){
   if (minutes <=0){
@@ -92,13 +151,14 @@ void setTimer(int minutes){
   }
   traceCh("Set timer for (min)");
   traceChln(String(minutes));
-  
-
   timerMillisEnd = millis() + minutes*60000;
 }
 
 // Check the status of the timer return 1 when the timer end
 int checkTimer(){
+  if (millis() >= timerOLEDMillisEnd){
+    OLEDClear();
+  }
   if (timerMillisEnd == 0){
     return (0);
   }
@@ -106,7 +166,7 @@ int checkTimer(){
     traceChln("Timer end");
     // reset the timer
     timerMillisEnd = 0;
-    setParams(ssid,pass,mqtt,mqttport,idx,"0");
+    setParams(ssid,pass,mqtt,mqttUser,mqttPass,mqttport,idx,"0");
     return(1);
   }
   return (0);
@@ -158,7 +218,6 @@ void processIRCode(int code){
         }
         else{
           traceChln("Code from MQTT : "+String(code)+" desc "+ desc);
-          
           dumpCodeList(codeList,len);
           irsend.sendRaw(codeList, len, 38);
           //irsend.sendRaw(LED_ON, len, 38);
@@ -174,7 +233,7 @@ void processIRCode(int code){
 void dumpEEPROM(){
   char output[10];
   traceChln("dumpEEPROM start");
-  for(int i =0;i<70;i++){
+  for(int i =0;i<500;i++){
     snprintf(output,10,"%x ",EEPROM.read(i));
     traceCh(output);
   }
@@ -225,7 +284,6 @@ int readRevison(char* value,int* index){
   value[i]='\0';
   traceCh("Revision read : ");
   traceChln(value);
-
   // Compare the revision
   if (strcmp(value,REV) != 0){
     return -2;
@@ -233,20 +291,20 @@ int readRevison(char* value,int* index){
   return 0;
 }
 
-int getParams(char* revision,char* ssid,char* pass,char* mqtt,char* mqttPort,char* idx,char* timer){
+int getParams(char* revision,char* ssid,char* pass,char* mqtt,char* mqttUser,char* mqttPass,char* mqttPort,char* idx,char* timer){
   int i =0;
   int wnReturn = 0;
   wnReturn = readRevison (revision,&i);
   traceCh("getParams wnReturn = ");
   traceChln(String(wnReturn));
-  
   if (wnReturn <0){
     return -1;
   }
-
   readParam(ssid,&i);
   readParam(pass,&i);
   readParam(mqtt,&i);
+  readParam(mqttUser,&i);
+  readParam(mqttPass,&i);
   readParam(mqttport,&i);
   readParam(idx,&i);
   readParam(timer,&i);
@@ -266,7 +324,7 @@ void writeParam(char* value,int* index){
   EEPROM.write(*index, '\0');
   (*index)++;
 }
-void setParams(char* ssid,char* pass,char* mqtt,char* mqttPort,char* idx,char* timer){
+void setParams(char* ssid,char* pass,char* mqtt,char* mqttUser,char* mqttPass,char* mqttPort,char* idx,char* timer){
   int i =0;
   
   ClearEeprom();//First Clear Eeprom
@@ -275,6 +333,8 @@ void setParams(char* ssid,char* pass,char* mqtt,char* mqttPort,char* idx,char* t
   writeParam(ssid,&i);
   writeParam(pass,&i);
   writeParam(mqtt,&i);
+  writeParam(mqttUser,&i);
+  writeParam(mqttPass,&i);
   writeParam(mqttPort,&i);
   writeParam(idx,&i);
   writeParam(timer,&i);
@@ -321,7 +381,6 @@ void parseMqttMessage(char* message,int* index,int* value){
   traceChln("strTempo : "+strTempo);
   strTempo.trim();
   *index = strTempo.toInt();
-
   strTempo = strMessage.substring(posValue);
   posComma = strTempo.indexOf(',');
   strTempo = strTempo.substring(0,posComma);
@@ -330,7 +389,6 @@ void parseMqttMessage(char* message,int* index,int* value){
   }
   strTempo.trim();
   *value = strTempo.toInt();
-
 }
 
 void callback(char* topic, byte* payload, unsigned int length) {
@@ -358,7 +416,6 @@ void callback(char* topic, byte* payload, unsigned int length) {
   traceCh("tempo = ");
   traceChln(tempo);
   processIRCode(atoi(tempo));
-  
 }
 
 void reconnect() {
@@ -372,7 +429,7 @@ void reconnect() {
     chTimer[0]='\0';
     sprintf(chTimer,"%d",remainingTimer);
     traceChln("Save timer");
-    setParams(ssid,pass,mqtt,mqttport,idx,chTimer);
+    setParams(ssid,pass,mqtt,mqttUser,mqttPass,mqttport,idx,chTimer);
     traceChln("Rebooting ESP");
     ESP.restart();
   }
@@ -389,10 +446,10 @@ void reconnect() {
       // $*$*$ irsend.sendRaw(LED_OFF, 71, 38);
     }
     String clientId = idx;
-   
     // Attempt to connect
-    if (client.connect(clientId.c_str(),"uxewingr","up2OdBVGET64")) {
+    if (client.connect(clientId.c_str(),mqttUser,mqttPass)) {
       traceChln("connected");
+      OLEDChln("MQTT OK");
       // Once connected, publish an announcement...
       String deviceIP ="";
       deviceIP = WiFi.localIP().toString();
@@ -413,6 +470,7 @@ void reconnect() {
       else{
         mqttKO = true;
         traceChln("Mqtt connection not possible, abort");
+        OLEDChln("MQTT failed");
         return;
       }
     }
@@ -440,7 +498,24 @@ void network_Page() {
   header(&s);
   s +="<h1>Device settings</h1> ";
   s += "<p>";
-  s += "<form method='get' action='a'>"+st+"<label>Paswoord: </label><input name='pass' length=64><br><label>MQTT Server : </label><input name='mqtt' length=64 value="+mqtt+"><br><label>MQTT port : </label><input name='mqttPort' length=6 value="+mqttport+"><br><label>Idx: </label><input name='idx' length=6 value="+idx+"><br><input type='submit'></form>";
+  s += "<form method='get' action='a'>"+st;
+  s +="<label>Paswoord: </label><input name='pass' length=64>";
+  s +="<br><label>MQTT Server : </label><input name='mqtt' length=100 value=";
+  s +=mqtt;
+  s +=">";
+  s +="<br><label>MQTT User : </label><input name='mqttUser' length=30 value=";
+  s +=mqttUser;
+  s +=">";
+  s +="<br><label>MQTT Password : </label><input name='mqttPass' length=30 value=";
+  s +=mqttPass;
+  s +=">";
+  s +="<br><label>MQTT port : </label><input name='mqttPort' length=6 value=";
+  s +=mqttport;
+  s +=">";
+  s +="<br><label>Idx: </label><input name='idx' length=6 value=";
+  s +=idx;
+  s +=">";
+  s +="<br><input type='submit'></form>";
   footer(&s);
   server.send( 200 , "text/html", s);
 }
@@ -450,11 +525,13 @@ void Get_Req(){
     strcpy(ssid,server.arg("ssid").c_str());//Get SSID
     strcpy(pass,server.arg("pass").c_str());//Get Password
     strcpy(mqtt,server.arg("mqtt").c_str());
+    strcpy(mqttUser,server.arg("mqttUser").c_str());
+    strcpy(mqttPass,server.arg("mqttPass").c_str());
     strcpy(mqttport,server.arg("mqttPort").c_str());
     strcpy(idx,server.arg("idx").c_str());
   }
   // Write parameters in eeprom
-  setParams(ssid,pass,mqtt,mqttport,idx,"0");
+  setParams(ssid,pass,mqtt,mqttUser,mqttPass,mqttport,idx,"0");
   String s = "";
   header(&s);
   s += "<h1>Device settings</h1> ";
@@ -472,6 +549,7 @@ void header(String* s){
   *s += "<html>";
   *s += "<head><style>"+css+"</style><title>IR Remote</title></head>"; 
   *s += "<body>";
+  *s +="<br><br><a href=\"/\">Home</a><br>";
 }
 void footer(String* s){
   *s +="<br><br><a href=\"/\">Home</a><br>";
@@ -498,7 +576,7 @@ void settings_Page() {
   s +="<h1>IR Remote Settings</h1> ";
   s +="<a href=\"/up\">Upload file</a><br>";
   s +="<a href=\"/network\">Network</a><br>";
-  s +="<a href=\"/ircodelist\">Network</a><br>";
+  s +="<a href=\"/ircodelist\">Code list</a><br>";
   footer(&s);
   server.send( 200 , "text/html", s);
 }
@@ -565,45 +643,45 @@ void upload_Page(){
 // Utilities
 /////////////////////////////////////////////////////////////////
 void blinkLed(void){
-  digitalWrite(LEDPIN, LOW);
+  digitalWrite(LEDPIN, LEDLOW);
   delay(200);
-  digitalWrite(LEDPIN, HIGH);
+  digitalWrite(LEDPIN, LEDHIGH);
   delay(200);
-  digitalWrite(LEDPIN, LOW);
+  digitalWrite(LEDPIN, LEDLOW);
   delay(200);
-  digitalWrite(LEDPIN, HIGH);
+  digitalWrite(LEDPIN, LEDHIGH);
   delay(200);
-  digitalWrite(LEDPIN, LOW);
+  digitalWrite(LEDPIN, LEDLOW);
   delay(200);
-  digitalWrite(LEDPIN, HIGH);
+  digitalWrite(LEDPIN, LEDHIGH);
   delay(200);
-  digitalWrite(LEDPIN, LOW);
+  digitalWrite(LEDPIN, LEDLOW);
 }
 
 void onOffLed(void){
-  digitalWrite(LEDPIN, LOW);
-  digitalWrite(LEDPIN, HIGH);
+  digitalWrite(LEDPIN, LEDLOW);
+  digitalWrite(LEDPIN, LEDHIGH);
   delay(200);
-  digitalWrite(LEDPIN, LOW);
+  digitalWrite(LEDPIN, LEDLOW);
 }
 
 void manageButton(void){
   button = digitalRead(BUTTON_PIN);
-  if (button == HIGH){
+  if (button == BUTTONHIGH){
     traceChln(" Button pressed");
-    digitalWrite(LEDPIN, HIGH);
+    digitalWrite(LEDPIN, LEDHIGH);
     delay(1000);
     button = digitalRead(BUTTON_PIN);
-    if (button == HIGH){
+    if (button == BUTTONHIGH){
       blinkLed();
       ssid[0]='\0';
-      setParams(ssid,pass,mqtt,mqttport,idx,"0");
+      setParams(ssid,pass,mqtt,mqttUser,mqttPass,mqttport,idx,"0");
       traceChln("Rebooting ESP");
       ESP.restart();
     }
   }
   else{
-    digitalWrite(LEDPIN, LOW);
+    digitalWrite(LEDPIN, LEDLOW);
   }
 }
 
@@ -778,7 +856,22 @@ int convertStringToArray(String codes, uint16_t* codeArray){
 }
 
 void setup() {
-  //pinMode(0, OUTPUT);
+  //OLED setup 
+    // by default, we'll generate the high voltage from the 3.3v line internally! (neat!)
+  display.begin(SSD1306_SWITCHCAPVCC, 0x3C);  // initialize with the I2C addr 0x3C (for the 64x48)
+  // init done
+ 
+  display.display();
+  delay(2000);
+ 
+  // Clear the buffer.
+  OLEDClear();
+ 
+  // text display tests
+  display.setTextSize(1);
+  display.setTextColor(WHITE);
+  // end OLED setup
+  OLEDChln("Setup");
   pinMode(BUTTON_PIN, INPUT);
   pinMode(LEDPIN, OUTPUT);
   irsend.begin();
@@ -787,6 +880,8 @@ void setup() {
   ssid[0] = '\0';
   pass[0] = '\0';
   mqtt[0] = '\0';
+  mqttUser[0] = '\0';
+  mqttPass[0] = '\0';
   mqttport[0] = '\0';
   idx[0] = '\0';
   timer[0] = '\0';
@@ -816,9 +911,8 @@ void setup() {
     traceCh("File doesn't exist : ");
     traceChln(cssFileName);
   }
-
   // Reading EEProm SSID-Password
-  if(getParams(revision,ssid,pass,mqtt,mqttport,idx,timer) !=0 ){
+  if(getParams(revision,ssid,pass,mqtt,mqttUser,mqttPass,mqttport,idx,timer) !=0 ){
     // Config mode
     startServer = 0;
   }
@@ -833,6 +927,8 @@ void setup() {
       traceChln(ssid);
       traceChln(pass);
       traceChln(mqtt);
+      traceChln(mqttUser);
+      traceChln(mqttPass);
       traceChln(mqttport);
       traceChln(idx);
       traceChln(timer);
@@ -854,6 +950,10 @@ void setup() {
       if (debug == 1){
         Serial.println(WiFi.localIP());
       }
+      OLEDClear();
+      OLEDChln("WiFi OK");
+      OLEDChln("IP:");
+      OLEDChln(WiFi.localIP().toString());
       blinkLed();
       // Connect mqtt server
       client.setServer(mqtt, atoi(mqttport));
@@ -888,6 +988,7 @@ void loop() {
   manageButton();
   if (startServer == 0){ 
     traceChln("Starting Access point..");
+    OLEDChln("Starting Access point..");
     WiFi.mode(WIFI_AP);
     WiFi.softAPConfig(apIP, apIP, IPAddress(255, 255, 255, 0));
     WiFi.softAP("Wifi device setup");
